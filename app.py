@@ -302,16 +302,11 @@ if __name__ == '__main__':
     load_model()
     print("Model loaded successfully!")
     print("Starting Flask server...")
+    
+    # Get port from environment variable (Render provides this)
     port = int(os.environ.get('PORT', 8080))
     
-    # Try HTTPS by default for webcam access
-    try:
-        print(f"Server running on https://0.0.0.0:{port}")
-        print("Note: You may need to accept a security warning for the self-signed certificate")
-        print("Access at: https://localhost:8080")
-        app.run(debug=True, host='0.0.0.0', port=port, ssl_context='adhoc')
-    except Exception as e:
-        print(f"HTTPS failed: {e}")
-        print(f"Falling back to HTTP at http://0.0.0.0:{port}")
-        print("Note: Webcam may not work over HTTP. Try disabling browser extensions.")
-        app.run(debug=True, host='0.0.0.0', port=port)
+    # Render handles HTTPS automatically, so we just use HTTP
+    # Bind to 0.0.0.0 to accept connections from all interfaces
+    print(f"Server running on http://0.0.0.0:{port}")
+    app.run(debug=False, host='0.0.0.0', port=port)
