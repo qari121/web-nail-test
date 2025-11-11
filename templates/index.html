@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Nail Detection</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            min-height: 100vh;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            max-width: 1200px;
+            width: 100%;
+            background: #2a2a2a;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+            padding: 30px;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 15px 30px;
+            font-size: 1em;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #45a049;
+            transform: translateY(-2px);
+        }
+
+        .btn-danger {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #da190b;
+        }
+
+        .btn-secondary {
+            background: #666;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #555;
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .video-container video,
+        .video-container canvas {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+            color: #4CAF50;
+            font-weight: 600;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #333;
+            border-top: 4px solid #4CAF50;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .status {
+            text-align: center;
+            color: #888;
+            margin-top: 20px;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>💅 Live Nail Detection</h1>
+            <p style="color: #888;">Real-time nail mask detection from webcam</p>
+        </div>
+
+        <div class="controls">
+            <button class="btn-primary" id="startBtn">📷 Start Camera</button>
+            <button class="btn-danger" id="stopBtn" style="display: none;">⏹ Stop Camera</button>
+        </div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Processing...</p>
+        </div>
+
+        <div class="video-container">
+            <video id="webcamVideo" autoplay playsinline style="display: none;"></video>
+            <canvas id="outputCanvas"></canvas>
+        </div>
+
+        <div class="status" id="status">Click "Start Camera" to begin</div>
+    </div>
+
+    <script>
+        // Comprehensive webcam API detection and polyfill
+        console.log('=== Webcam API Detection ===');
+        console.log('Protocol:', location.protocol);
+        console.log('Hostname:', location.hostname);
+        console.log('navigator.mediaDevices:', navigator.mediaDevices);
+        console.log('navigator.getUserMedia:', navigator.getUserMedia);
+        console.log('navigator.webkitGetUserMedia:', navigator.webkitGetUserMedia);
+        console.log('navigator.mozGetUserMedia:', navigator.mozGetUserMedia);
+        
+        // Try to create mediaDevices if it doesn't exist
+        if (!navigator.mediaDevices) {
+            console.warn('navigator.mediaDevices is undefined - attempting polyfill');
+            navigator.mediaDevices = {};
+            
+            // Try to find any getUserMedia implementation
+            const getUserMediaImpl = navigator.getUserMedia || 
+                                    navigator.webkitGetUserMedia || 
+                                    navigator.mozGetUserMedia || 
+                                    navigator.msGetUserMedia;
+            
+            if (getUserMediaImpl) {
+                console.log('Found fallback getUserMedia implementation');
+                navigator.mediaDevices.getUserMedia = function(constraints) {
+                    return new Promise(function(resolve, reject) {
+                        getUserMediaImpl.call(navigator, constraints, resolve, reject);
+                    });
+                };
+            } else {
+                console.error('No getUserMedia implementation found at all!');
+                // Create a stub that provides helpful error
+                navigator.mediaDevices.getUserMedia = function(constraints) {
+                    return Promise.reject(new Error(
+                        'Camera API not available. This usually means:\n' +
+                        '1. Chrome security policy blocking access\n' +
+                        '2. System-level camera permissions denied\n' +
+                        '3. Try: chrome://flags/#unsafely-treat-insecure-origin-as-secure\n' +
+                        '   Add: http://localhost:8080\n' +
+                        '4. Or use a different browser (Firefox/Safari)'
+                    ));
+                };
+            }
+        } else if (!navigator.mediaDevices.getUserMedia) {
+            // mediaDevices exists but getUserMedia doesn't
+            const getUserMediaImpl = navigator.getUserMedia || 
+                                    navigator.webkitGetUserMedia || 
+                                    navigator.mozGetUserMedia || 
+                                    navigator.msGetUserMedia;
+            
+            if (getUserMediaImpl) {
+                navigator.mediaDevices.getUserMedia = function(constraints) {
+                    return new Promise(function(resolve, reject) {
+                        getUserMediaImpl.call(navigator, constraints, resolve, reject);
+                    });
+                };
+            }
+        }
+        
+        console.log('Final navigator.mediaDevices.getUserMedia:', navigator.mediaDevices.getUserMedia);
+
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const webcamVideo = document.getElementById('webcamVideo');
+        const outputCanvas = document.getElementById('outputCanvas');
+        const ctx = outputCanvas.getContext('2d');
+        const status = document.getElementById('status');
+        const loading = document.getElementById('loading');
+
+        let stream = null;
+        let processingInterval = null;
+        let isProcessing = false;
+
+        startBtn.addEventListener('click', async () => {
+            try {
+                // Check if we're on HTTPS or localhost
+                const isSecure = location.protocol === 'https:' || 
+                                location.hostname === 'localhost' || 
+                                location.hostname === '127.0.0.1';
+                
+                if (!isSecure) {
+                    const currentUrl = `${location.protocol}//${location.hostname}:${location.port || 8080}`;
+                    alert(`Webcam requires HTTPS or localhost.\n\n` +
+                          `You're accessing via: ${currentUrl}\n\n` +
+                          `Solutions:\n\n` +
+                          `1. Use localhost instead:\n` +
+                          `   http://localhost:8080\n\n` +
+                          `2. Use HTTPS:\n` +
+                          `   https://${location.hostname}:${location.port || 8080}\n\n` +
+                          `3. Enable Chrome flag:\n` +
+                          `   chrome://flags/#unsafely-treat-insecure-origin-as-secure\n` +
+                          `   Add: ${currentUrl}\n` +
+                          `   Restart Chrome`);
+                    return;
+                }
+
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    const errorMsg = 'Webcam API not available.\n\n' +
+                          'Try these solutions:\n\n' +
+                          '1. Enable insecure origins in Chrome:\n' +
+                          '   - Go to: chrome://flags/#unsafely-treat-insecure-origin-as-secure\n' +
+                          '   - Add: http://localhost:8080\n' +
+                          '   - Restart Chrome\n\n' +
+                          '2. Use HTTPS (server should auto-enable)\n\n' +
+                          '3. Check system camera permissions\n\n' +
+                          '4. Try Firefox or Safari browser\n\n' +
+                          'Check console (F12) for detailed diagnostics.';
+                    alert(errorMsg);
+                    console.error('navigator.mediaDevices:', navigator.mediaDevices);
+                    return;
+                }
+
+                console.log('Requesting camera access...');
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { 
+                            width: { ideal: 640 },
+                            height: { ideal: 480 }
+                        } 
+                    });
+                    console.log('Camera access granted!');
+                } catch (getUserMediaError) {
+                    console.error('getUserMedia error:', getUserMediaError);
+                    throw getUserMediaError; // Re-throw to be caught by outer catch
+                }
+                
+                webcamVideo.srcObject = stream;
+                webcamVideo.style.display = 'block';
+                
+                webcamVideo.addEventListener('loadedmetadata', () => {
+                    outputCanvas.width = webcamVideo.videoWidth;
+                    outputCanvas.height = webcamVideo.videoHeight;
+                });
+
+                startBtn.style.display = 'none';
+                stopBtn.style.display = 'inline-block';
+                status.textContent = 'Camera active - Processing frames...';
+
+                // Process frames
+                processingInterval = setInterval(() => {
+                    if (!isProcessing && webcamVideo.readyState === webcamVideo.HAVE_ENOUGH_DATA) {
+                        processFrame();
+                    }
+                }, 100); // Process every 100ms (~10 FPS)
+
+            } catch (error) {
+                let errorMsg = 'Error accessing webcam: ';
+                if (error.name === 'NotAllowedError') {
+                    errorMsg += 'Permission denied. Please allow camera access.';
+                } else if (error.name === 'NotFoundError') {
+                    errorMsg += 'No camera found.';
+                } else {
+                    errorMsg += error.message;
+                }
+                alert(errorMsg);
+                console.error('Webcam error:', error);
+            }
+        });
+
+        stopBtn.addEventListener('click', () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            if (processingInterval) {
+                clearInterval(processingInterval);
+                processingInterval = null;
+            }
+            webcamVideo.style.display = 'none';
+            ctx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+            startBtn.style.display = 'inline-block';
+            stopBtn.style.display = 'none';
+            status.textContent = 'Camera stopped';
+        });
+
+        async function processFrame() {
+            if (isProcessing) return;
+            
+            isProcessing = true;
+            
+            try {
+                // Capture frame from video
+                const canvas = document.createElement('canvas');
+                canvas.width = webcamVideo.videoWidth;
+                canvas.height = webcamVideo.videoHeight;
+                const ctx2 = canvas.getContext('2d');
+                ctx2.drawImage(webcamVideo, 0, 0);
+                
+                const imageData = canvas.toDataURL('image/jpeg', 0.8);
+
+                // Send to server for processing
+                const response = await fetch('/api/process_base64', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        image: imageData
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    // Draw processed image on canvas
+                    const img = new Image();
+                    img.onload = () => {
+                        ctx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+                        ctx.drawImage(img, 0, 0, outputCanvas.width, outputCanvas.height);
+                    };
+                    img.src = data.image;
+                } else {
+                    console.error('Processing error:', data.error);
+                }
+            } catch (error) {
+                console.error('Frame processing error:', error);
+            } finally {
+                isProcessing = false;
+            }
+        }
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+            if (processingInterval) {
+                clearInterval(processingInterval);
+            }
+        });
+    </script>
+</body>
+</html>
