@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+README*
+
+# Test files
+test/
+tests/
+*.test.py
+
+# Uploads and outputs
+uploads/*
+!uploads/.gitkeep
+nail_masks/
+
+# Images (keep only model file)
+*.jpeg
+*.jpg
+*.png
+*.gif
+
+# Other Python files (keep only app.py)
+realtime_nail_polish*.py
+process_images.py
+inspect_model.py
+
+# OS
+.DS_Store
+Thumbs.db
+
