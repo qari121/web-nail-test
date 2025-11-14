@@ -66,32 +66,46 @@ def load_model():
     if not os.path.exists(MODEL_PATH):
         raise FileNotFoundError(f"TFLite model not found at: {MODEL_PATH}")
     
-    # Try GPU delegate if available
-    interpreter = None
+    # Check for CUDA/GPU availability first
+    cuda_available = False
     try:
-        delegate_list = []
-        try:
-            gpu_delegate = tf.lite.experimental.load_delegate('libedgetpu.so.1')
-            delegate_list.append(gpu_delegate)
-            print("Using EdgeTPU delegate")
-        except:
-            try:
-                gpu_delegate = tf.lite.experimental.load_delegate('libgpu_delegate.so')
-                delegate_list.append(gpu_delegate)
-                print("Using GPU delegate")
-            except:
-                print("GPU delegate not available, using CPU")
+        import subprocess
+        result = subprocess.run(['nvidia-smi'], capture_output=True, timeout=2)
+        if result.returncode == 0:
+            cuda_available = True
+            print("CUDA/GPU detected via nvidia-smi")
+    except:
+        pass
+    
+    # Try GPU delegate if CUDA is available
+    interpreter = None
+    delegate_used = False
+    
+    if cuda_available:
+        # Try different GPU delegate paths
+        delegate_paths = [
+            'libgpu_delegate.so',
+            '/usr/lib/x86_64-linux-gnu/libgpu_delegate.so',
+            '/usr/local/lib/libgpu_delegate.so',
+        ]
         
-        if delegate_list:
-            interpreter = tf.lite.Interpreter(
-                model_path=MODEL_PATH,
-                experimental_delegates=delegate_list,
-                num_threads=TFLITE_THREADS
-            )
-        else:
-            interpreter = tf.lite.Interpreter(model_path=MODEL_PATH, num_threads=TFLITE_THREADS)
-    except Exception as e:
-        print(f"GPU delegate failed ({e}), falling back to CPU")
+        for delegate_path in delegate_paths:
+            try:
+                gpu_delegate = tf.lite.experimental.load_delegate(delegate_path)
+                interpreter = tf.lite.Interpreter(
+                    model_path=MODEL_PATH,
+                    experimental_delegates=[gpu_delegate],
+                    num_threads=TFLITE_THREADS
+                )
+                print(f"✓ Using GPU delegate: {delegate_path}")
+                delegate_used = True
+                break
+            except Exception as e:
+                continue
+    
+    # Fallback to CPU if GPU delegate not available
+    if not delegate_used:
+        print("⚠ GPU delegate not available, using CPU (XNNPACK optimized)")
         interpreter = tf.lite.Interpreter(model_path=MODEL_PATH, num_threads=TFLITE_THREADS)
     
     interpreter.allocate_tensors()
@@ -324,21 +338,27 @@ def process_image(image_bgr):
     except:
         pass
 
+    # Optimize mask processing - only process if mask exists
     if combined_mask.any():
+        # Use smaller downscale for faster processing (already at 0.25, keep it)
         small_w = max(8, int(W * MASK_DOWNSCALE))
         small_h = max(8, int(H * MASK_DOWNSCALE))
-        small_mask = cv2.resize(combined_mask, (small_w, small_h), interpolation=cv2.INTER_LINEAR)
+        
+        # Use NEAREST for downscale (faster), LINEAR for upscale (better quality)
+        small_mask = cv2.resize(combined_mask, (small_w, small_h), interpolation=cv2.INTER_NEAREST)
         _, small_mask = cv2.threshold(small_mask, 127, 255, cv2.THRESH_BINARY)
         
         min_area_scaled = max(20, int(MIN_CONTOUR * (MASK_DOWNSCALE ** 2)))
         refined_small = refine_nail_mask(small_mask, min_area=min_area_scaled, kernel=_SMALL_KERNEL)
         
+        # Optimize dilation kernel creation (pre-compute if possible, but keep dynamic for flexibility)
         dilate_kernel_scaled = np.ones((
             max(1, int(DILATION_PIXELS * MASK_DOWNSCALE)),
             max(1, int(DILATION_PIXELS * MASK_DOWNSCALE))
         ), dtype=np.uint8)
         refined_small = cv2.dilate(refined_small, dilate_kernel_scaled, iterations=1)
         
+        # Use LINEAR for upscale to maintain quality
         refined_mask = cv2.resize(refined_small, (W, H), interpolation=cv2.INTER_LINEAR)
         _, refined_mask = cv2.threshold(refined_mask, 127, 255, cv2.THRESH_BINARY)
     else:
@@ -398,8 +418,9 @@ def _process_frame_worker():
                 # Process image
                 result_rgb = process_image(image_bgr)
                 
-                # Encode as JPEG (binary, not base64)
-                encode_params = [cv2.IMWRITE_JPEG_QUALITY, 75]
+                # Encode as JPEG (optimized quality/speed balance)
+                # Quality 80 for better quality while still being fast
+                encode_params = [cv2.IMWRITE_JPEG_QUALITY, 80]
                 _, buffer = cv2.imencode('.jpg', cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR), encode_params)
                 
                 # Send result back to all connected clients (Flask-SocketIO handles binary automatically)

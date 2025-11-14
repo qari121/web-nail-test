@@ -336,7 +336,7 @@
                             }
                         }, 'image/jpeg', 0.6); // Lower quality for speed
                     }
-                }, 100); // Process every 100ms (10 FPS max) - reduced to prevent queue buildup
+                }, 80); // Process every 80ms (~12 FPS max) - balanced for better FPS without queue buildup
 
             } catch (err) {
                 console.error('Error accessing camera:', err);
