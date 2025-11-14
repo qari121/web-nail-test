@@ -203,51 +203,57 @@ def process_image(image_bgr):
     
     interpreter.set_tensor(input_details[0]['index'], _input_tensor)
     interpreter.invoke()
-    outputs = [np.copy(interpreter.get_tensor(od['index'])) for od in output_details]
+    # Copy outputs immediately and ensure no references remain
+    outputs = []
+    for od in output_details:
+        tensor_data = interpreter.get_tensor(od['index'])
+        outputs.append(np.array(tensor_data, copy=True))
     
     combined_mask = np.zeros((H, W), dtype=np.uint8)
     
     if proto_idx is not None and det_idx is not None:
-        proto = outputs[proto_idx].copy()
+        # Get copies immediately and clear references
+        proto = np.array(outputs[proto_idx], copy=True)
         if proto.ndim == 4 and proto.shape[0] == 1:
-            proto = proto[0].copy()
+            proto = np.array(proto[0], copy=True)
         elif proto.ndim == 3 and proto.shape[0] == 1:
-            proto = proto[0].copy()
+            proto = np.array(proto[0], copy=True)
         if proto is not None and proto.ndim != 3:
             proto = None
 
-        det = outputs[det_idx].copy()
+        det = np.array(outputs[det_idx], copy=True)
         if det.ndim == 3 and det.shape[0] == 1:
-            det = det[0].copy()
+            det = np.array(det[0], copy=True)
         if det.ndim == 2 and det.shape[0] < det.shape[1] and det.shape[0] <= 50:
-            det = det.transpose(1, 0).copy()
+            det = np.array(det.transpose(1, 0), copy=True)
 
         if proto is not None and det.ndim == 2:
             P = proto.shape[-1]
             cols = det.shape[1]
             if cols >= 5 + P:
-                mask_coeffs = det[:, -P:].copy()
-                scores = det[:, 4].copy()
-                boxes = det[:, :4].copy()
+                mask_coeffs = np.array(det[:, -P:], copy=True)
+                scores = np.array(det[:, 4], copy=True)
+                boxes = np.array(det[:, :4], copy=True)
             else:
-                mask_coeffs = det[:, -P:].copy()
-                scores = det[:, 4].copy() if det.shape[1] > 4 else np.zeros(det.shape[0])
-                boxes = det[:, :4].copy() if det.shape[1] >= 4 else np.zeros((det.shape[0], 4))
+                mask_coeffs = np.array(det[:, -P:], copy=True)
+                scores = np.array(det[:, 4], copy=True) if det.shape[1] > 4 else np.zeros(det.shape[0])
+                boxes = np.array(det[:, :4], copy=True) if det.shape[1] >= 4 else np.zeros((det.shape[0], 4))
 
             valid_idx = np.where(scores > 0.25)[0]
             if valid_idx.size > 0:
-                mask_coeffs = mask_coeffs[valid_idx].copy()
-                boxes = boxes[valid_idx].copy()
+                mask_coeffs = np.array(mask_coeffs[valid_idx], copy=True)
+                boxes = np.array(boxes[valid_idx], copy=True)
 
                 ph, pw, _ = proto.shape
-                proto_flat = proto.reshape(-1, P).copy()
-                mask_logits = proto_flat @ mask_coeffs.T
+                # Ensure reshape creates a copy, not a view
+                proto_reshaped = np.array(proto.reshape(-1, P), copy=True)
+                mask_logits = proto_reshaped @ mask_coeffs.T
                 mask_stack = 1.0 / (1.0 + np.exp(-mask_logits))
-                mask_stack = mask_stack.reshape(ph, pw, -1).copy()
+                mask_stack = np.array(mask_stack.reshape(ph, pw, -1), copy=True)
 
                 combined_mask_in = np.zeros((in_h, in_w), dtype=np.uint8)
                 for idx in range(mask_stack.shape[-1]):
-                    mask = mask_stack[:, :, idx].copy()
+                    mask = np.array(mask_stack[:, :, idx], copy=True)
                     mask_in = cv2.resize((mask * 255.0).astype(np.uint8),
                                          (in_w, in_h),
                                          interpolation=cv2.INTER_LINEAR)
@@ -277,6 +283,11 @@ def process_image(image_bgr):
                 if combined_mask_in.any():
                     mask_full = cv2.resize(combined_mask_in, (W, H), interpolation=cv2.INTER_LINEAR)
                     _, combined_mask = cv2.threshold(mask_full, 127, 255, cv2.THRESH_BINARY)
+        
+        # Clear all references to outputs before function returns
+        del outputs, proto, det
+        if 'mask_coeffs' in locals():
+            del mask_coeffs, scores, boxes, proto_reshaped, mask_logits, mask_stack
 
     if combined_mask.any():
         small_w = max(8, int(W * MASK_DOWNSCALE))
