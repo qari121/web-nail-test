@@ -235,8 +235,8 @@ def process_image(image_bgr):
             det = np.array(det.transpose(1, 0), copy=True)
     
     combined_mask = np.zeros((H, W), dtype=np.uint8)
-
-        if proto is not None and det.ndim == 2:
+    
+    if proto_idx is not None and det_idx is not None and proto is not None and det.ndim == 2:
             P = proto.shape[-1]
             cols = det.shape[1]
             if cols >= 5 + P:
