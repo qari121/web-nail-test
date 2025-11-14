@@ -203,23 +203,24 @@ def process_image(image_bgr):
     
     interpreter.set_tensor(input_details[0]['index'], _input_tensor)
     interpreter.invoke()
-    # Copy outputs immediately and ensure no references remain
-    # Get all outputs first, then copy them to break references
-    raw_outputs = []
-    for od in output_details:
-        raw_outputs.append(interpreter.get_tensor(od['index']))
     
-    # Now create deep copies to break all references
-    outputs = []
-    for raw_output in raw_outputs:
-        outputs.append(np.array(raw_output, copy=True))
-    del raw_outputs  # Clear raw references immediately
-    
-    combined_mask = np.zeros((H, W), dtype=np.uint8)
+    # Get outputs and copy immediately - CRITICAL: must copy before next invoke()
+    proto = None
+    det = None
     
     if proto_idx is not None and det_idx is not None:
-        # Get copies immediately and clear references
-        proto = np.array(outputs[proto_idx], copy=True)
+        # Get raw outputs
+        raw_proto = interpreter.get_tensor(output_details[proto_idx]['index'])
+        raw_det = interpreter.get_tensor(output_details[det_idx]['index'])
+        
+        # Create deep copies immediately to break all references
+        proto = np.array(raw_proto, copy=True)
+        det = np.array(raw_det, copy=True)
+        
+        # Clear raw references immediately
+        del raw_proto, raw_det
+        
+        # Process proto
         if proto.ndim == 4 and proto.shape[0] == 1:
             proto = np.array(proto[0], copy=True)
         elif proto.ndim == 3 and proto.shape[0] == 1:
@@ -227,11 +228,13 @@ def process_image(image_bgr):
         if proto is not None and proto.ndim != 3:
             proto = None
 
-        det = np.array(outputs[det_idx], copy=True)
+        # Process det
         if det.ndim == 3 and det.shape[0] == 1:
             det = np.array(det[0], copy=True)
         if det.ndim == 2 and det.shape[0] < det.shape[1] and det.shape[0] <= 50:
             det = np.array(det.transpose(1, 0), copy=True)
+    
+    combined_mask = np.zeros((H, W), dtype=np.uint8)
 
         if proto is not None and det.ndim == 2:
             P = proto.shape[-1]
@@ -293,16 +296,12 @@ def process_image(image_bgr):
                 # Clear references immediately after use (inside the if block)
                 del proto_reshaped, mask_logits, mask_stack, mask_coeffs, boxes, scores
         
-        # Clear all references to outputs before function returns
-        # Only delete variables that exist
-        try:
-            del outputs
-        except:
-            pass
-        try:
-            del proto, det
-        except:
-            pass
+        # Clear proto and det references before function returns
+        # This is critical to prevent TensorFlow Lite interpreter errors
+        if proto is not None:
+            del proto
+        if det is not None:
+            del det
 
     if combined_mask.any():
         small_w = max(8, int(W * MASK_DOWNSCALE))
