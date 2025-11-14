@@ -367,5 +367,6 @@ if __name__ == '__main__':
     print(f"Server running on http://0.0.0.0:{port}")
     print(f"OpenCV threads: {cv2.getNumThreads()}")
     print(f"TensorFlow threads: {TFLITE_THREADS}")
-    socketio.run(app, host='0.0.0.0', port=port, debug=False)
+    # Allow unsafe Werkzeug for development (use Gunicorn + eventlet for production)
+    socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)
 
