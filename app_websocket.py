@@ -375,7 +375,7 @@ def _process_frame_worker():
         try:
             # Get frame from queue (with timeout to check if we should stop)
             try:
-                frame_data, request_id = _frame_queue.get(timeout=0.1)
+                frame_data = _frame_queue.get(timeout=0.1)
             except Empty:
                 continue
             
@@ -402,12 +402,12 @@ def _process_frame_worker():
                 encode_params = [cv2.IMWRITE_JPEG_QUALITY, 75]
                 _, buffer = cv2.imencode('.jpg', cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR), encode_params)
                 
-                # Send result back to the client that requested it
-                socketio.emit('result', buffer.tobytes(), binary=True, to=request_id)
+                # Send result back to all connected clients
+                socketio.emit('result', buffer.tobytes(), binary=True)
                 
             except Exception as e:
                 traceback.print_exc()
-                socketio.emit('error', {'message': str(e)}, to=request_id)
+                socketio.emit('error', {'message': str(e)})
             
             finally:
                 _frame_queue.task_done()
@@ -420,18 +420,10 @@ def _process_frame_worker():
 def handle_frame(data):
     """Handle incoming frame (binary JPEG data) - add to queue, drop old frames"""
     try:
-        # Get the session ID for this client (Flask-SocketIO provides request in context)
-        from flask import request as flask_request
-        request_id = flask_request.sid if hasattr(flask_request, 'sid') else None
-        
-        # Fallback: use a simple identifier if sid not available
-        if request_id is None:
-            request_id = 'default'
-        
         # Try to put frame in queue (non-blocking)
         # If queue is full, remove old frame and add new one (only process latest)
         try:
-            _frame_queue.put_nowait((data, request_id))
+            _frame_queue.put_nowait(data)
         except:
             # Queue is full - remove old frame and add new one
             try:
@@ -439,7 +431,7 @@ def handle_frame(data):
             except:
                 pass
             try:
-                _frame_queue.put_nowait((data, request_id))  # Add new frame
+                _frame_queue.put_nowait(data)  # Add new frame
             except:
                 pass  # If still fails, skip this frame
     
