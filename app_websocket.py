@@ -7,6 +7,7 @@ import os
 import io
 import traceback
 import multiprocessing
+import threading
 from flask import Flask, render_template
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
@@ -17,6 +18,9 @@ import tensorflow as tf
 app = Flask(__name__)
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+
+# Thread lock for TensorFlow Lite interpreter (not thread-safe)
+_interpreter_lock = threading.Lock()
 
 # Configuration
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nails_seg_s_yolov8_v1_float16.tflite")
@@ -201,24 +205,28 @@ def process_image(image_bgr):
         _float_buffer *= (1.0 / 255.0)
         np.copyto(_input_tensor[0], _float_buffer)
     
-    interpreter.set_tensor(input_details[0]['index'], _input_tensor)
-    interpreter.invoke()
-    
-    # Get outputs and copy immediately - CRITICAL: must copy before next invoke()
-    proto = None
-    det = None
-    
-    if proto_idx is not None and det_idx is not None:
-        # Get raw outputs
-        raw_proto = interpreter.get_tensor(output_details[proto_idx]['index'])
-        raw_det = interpreter.get_tensor(output_details[det_idx]['index'])
+    # Use lock to ensure thread-safe access to interpreter
+    with _interpreter_lock:
+        interpreter.set_tensor(input_details[0]['index'], _input_tensor)
+        interpreter.invoke()
         
-        # Create deep copies immediately to break all references
-        proto = np.array(raw_proto, copy=True)
-        det = np.array(raw_det, copy=True)
+        # Get outputs and copy immediately - CRITICAL: must copy before next invoke()
+        proto = None
+        det = None
         
-        # Clear raw references immediately
-        del raw_proto, raw_det
+        if proto_idx is not None and det_idx is not None:
+            # Get raw outputs
+            raw_proto = interpreter.get_tensor(output_details[proto_idx]['index'])
+            raw_det = interpreter.get_tensor(output_details[det_idx]['index'])
+            
+            # Create deep copies immediately to break all references
+            proto = np.array(raw_proto, copy=True)
+            det = np.array(raw_det, copy=True)
+            
+            # Clear raw references immediately
+            del raw_proto, raw_det
+    
+    # Process outputs outside the lock to minimize lock time
         
         # Process proto
         if proto.ndim == 4 and proto.shape[0] == 1:
@@ -296,12 +304,18 @@ def process_image(image_bgr):
             # Clear references immediately after use (inside the if block)
             del proto_reshaped, mask_logits, mask_stack, mask_coeffs, boxes, scores
         
-        # Clear proto and det references before function returns
-        # This is critical to prevent TensorFlow Lite interpreter errors
+    # Clear proto and det references before function returns
+    # This is critical to prevent TensorFlow Lite interpreter errors
+    try:
         if proto is not None:
             del proto
+    except:
+        pass
+    try:
         if det is not None:
             del det
+    except:
+        pass
 
     if combined_mask.any():
         small_w = max(8, int(W * MASK_DOWNSCALE))
