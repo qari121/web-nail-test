@@ -170,34 +170,17 @@ def adaptive_smooth_contour(pts, iterations=1):
 
 
 def refine_nail_mask(bin_mask, min_area=60, kernel=_SMALL_KERNEL):
-    """Optimized mask refinement with contour smoothing"""
+    """Optimized mask refinement - simplified for maximum speed"""
     bin_mask = (bin_mask > 127).astype(np.uint8) * 255
     if bin_mask.sum() == 0:
         return bin_mask
     
-    # Combine morphological operations
+    # Simplified morphological operations (single pass, no contour processing)
+    # This is faster but slightly less accurate - good tradeoff for real-time
     m = cv2.morphologyEx(bin_mask, cv2.MORPH_CLOSE, kernel, iterations=1)
-    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, kernel, iterations=1)
+    refined = cv2.morphologyEx(m, cv2.MORPH_OPEN, kernel, iterations=1)
     
-    contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    refined = np.zeros_like(m)
-    
-    for c in contours:
-        area = cv2.contourArea(c)
-        if area < min_area:
-            continue
-        
-        # Reduced epsilon for faster approximation
-        epsilon = 0.015 * cv2.arcLength(c, True)
-        approx = cv2.approxPolyDP(c, epsilon, True)
-        
-        if len(approx) >= 3:
-            # Smooth contours for better quality
-            smooth = adaptive_smooth_contour(approx[:, 0, :], iterations=1)
-            if len(smooth) >= 3:
-                cv2.fillPoly(refined, [smooth], 255)
-    
-    # Lighter blur for performance
+    # Light blur only
     refined = cv2.GaussianBlur(refined, (3, 3), 0)
     _, refined = cv2.threshold(refined, 100, 255, cv2.THRESH_BINARY)
     return refined
@@ -352,8 +335,10 @@ def process_image(image_bgr):
 
 
 def image_to_base64(image_rgb):
-    """Convert RGB image to base64 string"""
-    _, buffer = cv2.imencode('.jpg', cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
+    """Convert RGB image to base64 string - optimized for speed"""
+    # Lower quality JPEG for faster encoding/decoding (75 instead of default 95)
+    encode_params = [cv2.IMWRITE_JPEG_QUALITY, 75]
+    _, buffer = cv2.imencode('.jpg', cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR), encode_params)
     img_base64 = base64.b64encode(buffer).decode('utf-8')
     return img_base64
 
