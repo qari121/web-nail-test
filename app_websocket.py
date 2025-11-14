@@ -216,13 +216,15 @@ def process_image(image_bgr):
     in_h, in_w = int(input_shape[1]), int(input_shape[2])
     input_dtype = input_details[0]['dtype']
     
+    # Use LINEAR for good quality/speed balance
     resized = cv2.resize(frame_rgb, (in_w, in_h), interpolation=cv2.INTER_LINEAR)
     
+    # Optimize input preparation with in-place operations
     if input_dtype == np.uint8:
         np.copyto(_input_tensor[0], resized, casting='unsafe')
     else:
-        _float_buffer[...] = resized
-        _float_buffer *= (1.0 / 255.0)
+        # Use in-place multiply for speed
+        np.multiply(resized, 1.0/255.0, out=_float_buffer, casting='unsafe')
         np.copyto(_input_tensor[0], _float_buffer)
     
     # Use lock to ensure thread-safe access to interpreter
