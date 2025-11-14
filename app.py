@@ -32,7 +32,7 @@ proto_idx = None
 # Processing parameters (optimized for performance)
 MIN_CONTOUR = 60
 DILATION_PIXELS = 3
-MASK_DOWNSCALE = 0.4  # Downscale mask processing for speed
+MASK_DOWNSCALE = 0.3  # Reduced from 0.4 for faster processing
 TFLITE_THREADS = max(1, multiprocessing.cpu_count() - 1)  # Use available CPUs
 
 _SMALL_KERNEL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
@@ -297,11 +297,11 @@ def process_image(image_bgr):
         # Downscale mask for faster processing
         small_w = max(8, int(W * MASK_DOWNSCALE))
         small_h = max(8, int(H * MASK_DOWNSCALE))
-        small_mask = cv2.resize(combined_mask, (small_w, small_h), interpolation=cv2.INTER_AREA)
+        small_mask = cv2.resize(combined_mask, (small_w, small_h), interpolation=cv2.INTER_LINEAR)
         _, small_mask = cv2.threshold(small_mask, 127, 255, cv2.THRESH_BINARY)
         
         # Refine on smaller mask
-        min_area_scaled = max(30, int(MIN_CONTOUR * (MASK_DOWNSCALE ** 2)))
+        min_area_scaled = max(20, int(MIN_CONTOUR * (MASK_DOWNSCALE ** 2)))  # Reduced threshold
         refined_small = refine_nail_mask(small_mask, min_area=min_area_scaled, kernel=_SMALL_KERNEL)
         
         # Dilate on smaller mask
@@ -311,8 +311,8 @@ def process_image(image_bgr):
         ), dtype=np.uint8)
         refined_small = cv2.dilate(refined_small, dilate_kernel_scaled, iterations=1)
         
-        # Upscale back to original size
-        refined_mask = cv2.resize(refined_small, (W, H), interpolation=cv2.INTER_AREA)
+        # Upscale back to original size (LINEAR is faster)
+        refined_mask = cv2.resize(refined_small, (W, H), interpolation=cv2.INTER_LINEAR)
         _, refined_mask = cv2.threshold(refined_mask, 127, 255, cv2.THRESH_BINARY)
     else:
         refined_mask = combined_mask
@@ -350,8 +350,8 @@ def process_base64():
         nparr = np.frombuffer(image_bytes, np.uint8)
         image_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
-        # Limit image size for performance (optional, can be adjusted)
-        max_dimension = 1280
+        # Limit image size for performance (reduced for faster processing)
+        max_dimension = 640  # Reduced from 1280 for better performance
         if image_bgr is not None:
             h, w = image_bgr.shape[:2]
             if max(h, w) > max_dimension:

@@ -362,12 +362,12 @@
                 latencyHistory = [];
                 lastFrameTime = Date.now();
 
-                // Process frames
+                // Process frames (faster interval for better FPS)
                 processingInterval = setInterval(() => {
                     if (!isProcessing && webcamVideo.readyState === webcamVideo.HAVE_ENOUGH_DATA) {
                         processFrame();
                     }
-                }, 100); // Process every 100ms (~10 FPS)
+                }, 50); // Process every 50ms (~20 FPS max)
 
             } catch (error) {
                 let errorMsg = 'Error accessing webcam: ';
