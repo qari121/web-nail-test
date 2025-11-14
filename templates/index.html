@@ -23,13 +23,13 @@
         }
 
         .container {
-            max-width: 1200px;
+            max-width: 450px;
             width: 100%;
             background: #2a2a2a;
             border-radius: 20px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
             overflow: hidden;
-            padding: 30px;
+            padding: 20px;
         }
 
         .header {
@@ -39,7 +39,7 @@
         }
 
         .header h1 {
-            font-size: 2.5em;
+            font-size: 1.8em;
             margin-bottom: 10px;
         }
 
@@ -52,8 +52,8 @@
         }
 
         button {
-            padding: 15px 30px;
-            font-size: 1em;
+            padding: 12px 24px;
+            font-size: 0.9em;
             font-weight: 600;
             border: none;
             border-radius: 8px;
@@ -92,18 +92,24 @@
         .video-container {
             position: relative;
             width: 100%;
-            max-width: 800px;
+            max-width: 375px;
             margin: 0 auto;
             background: #000;
             border-radius: 12px;
             overflow: hidden;
+            aspect-ratio: 9 / 16; /* Mobile portrait ratio */
         }
 
-        .video-container video,
+        .video-container video {
+            display: none !important; /* Completely hide original video */
+            visibility: hidden;
+        }
+
         .video-container canvas {
             width: 100%;
-            height: auto;
+            height: 100%;
             display: block;
+            object-fit: contain;
         }
 
         .loading {
@@ -292,11 +298,15 @@
                 }
                 
                 webcamVideo.srcObject = stream;
-                webcamVideo.style.display = 'block';
+                webcamVideo.style.display = 'none'; // Keep hidden
                 
                 webcamVideo.addEventListener('loadedmetadata', () => {
-                    outputCanvas.width = webcamVideo.videoWidth;
-                    outputCanvas.height = webcamVideo.videoHeight;
+                    // Set canvas to mobile portrait size
+                    const container = document.querySelector('.video-container');
+                    const containerWidth = container.offsetWidth;
+                    const aspectRatio = 9 / 16; // Mobile portrait
+                    outputCanvas.width = containerWidth;
+                    outputCanvas.height = containerWidth / aspectRatio;
                 });
 
                 startBtn.style.display = 'none';
@@ -369,11 +379,30 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    // Draw processed image on canvas
+                    // Draw processed image on canvas (only show processed output)
                     const img = new Image();
                     img.onload = () => {
                         ctx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
-                        ctx.drawImage(img, 0, 0, outputCanvas.width, outputCanvas.height);
+                        // Draw image to fill canvas maintaining aspect ratio
+                        const imgAspect = img.width / img.height;
+                        const canvasAspect = outputCanvas.width / outputCanvas.height;
+                        let drawWidth, drawHeight, drawX, drawY;
+                        
+                        if (imgAspect > canvasAspect) {
+                            // Image is wider - fit to height
+                            drawHeight = outputCanvas.height;
+                            drawWidth = drawHeight * imgAspect;
+                            drawX = (outputCanvas.width - drawWidth) / 2;
+                            drawY = 0;
+                        } else {
+                            // Image is taller - fit to width
+                            drawWidth = outputCanvas.width;
+                            drawHeight = drawWidth / imgAspect;
+                            drawX = 0;
+                            drawY = (outputCanvas.height - drawHeight) / 2;
+                        }
+                        
+                        ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
                     };
                     img.src = data.image;
                 } else {
