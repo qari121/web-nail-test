@@ -201,8 +201,8 @@ def process_image(image_bgr):
     in_h, in_w = int(input_shape[1]), int(input_shape[2])
     input_dtype = input_details[0]['dtype']
     
-    # Use faster resize algorithm
-    resized = cv2.resize(frame_rgb, (in_w, in_h), interpolation=cv2.INTER_AREA)
+    # Use faster resize algorithm (LINEAR is faster than AREA for downscaling)
+    resized = cv2.resize(frame_rgb, (in_w, in_h), interpolation=cv2.INTER_LINEAR)
     
     # Use pre-allocated buffers for better performance
     if input_dtype == np.uint8:
@@ -264,7 +264,7 @@ def process_image(image_bgr):
                     mask = mask_stack[:, :, idx].copy()
                     mask_in = cv2.resize((mask * 255.0).astype(np.uint8),
                                          (in_w, in_h),
-                                         interpolation=cv2.INTER_AREA)
+                                         interpolation=cv2.INTER_LINEAR)
 
                     cx, cy, bw, bh = boxes[idx]
                     if cx > 1.5 or cy > 1.5 or bw > 1.5 or bh > 1.5:
@@ -289,7 +289,7 @@ def process_image(image_bgr):
                         combined_mask_in = np.maximum(combined_mask_in, mask_in)
 
                 if combined_mask_in.any():
-                    mask_full = cv2.resize(combined_mask_in, (W, H), interpolation=cv2.INTER_AREA)
+                    mask_full = cv2.resize(combined_mask_in, (W, H), interpolation=cv2.INTER_LINEAR)
                     _, combined_mask = cv2.threshold(mask_full, 127, 255, cv2.THRESH_BINARY)
 
     # Refine mask with downscaling for better performance
@@ -357,7 +357,7 @@ def process_base64():
             if max(h, w) > max_dimension:
                 scale = max_dimension / max(h, w)
                 new_w, new_h = int(w * scale), int(h * scale)
-                image_bgr = cv2.resize(image_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                image_bgr = cv2.resize(image_bgr, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
         
         if image_bgr is None:
             return jsonify({'error': 'Invalid image format'}), 400
