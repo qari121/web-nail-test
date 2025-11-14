@@ -291,7 +291,7 @@ def process_image(image_bgr):
                     _, combined_mask = cv2.threshold(mask_full, 127, 255, cv2.THRESH_BINARY)
                 
                 # Clear references immediately after use (inside the if block)
-                del proto_reshaped, mask_logits, mask_stack, mask_coeffs, boxes, mask_coeffs, scores
+                del proto_reshaped, mask_logits, mask_stack, mask_coeffs, boxes, scores
         
         # Clear all references to outputs before function returns
         # Only delete variables that exist
