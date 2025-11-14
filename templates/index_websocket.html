@@ -211,8 +211,29 @@
             const requestTime = frameRequestTime || performance.now();
             frameRequestTime = null;
             
-            // data is binary JPEG data (not base64)
-            const blob = new Blob([data], { type: 'image/jpeg' });
+            // Handle binary data from Flask-SocketIO
+            // Flask-SocketIO may send bytes as ArrayBuffer or Uint8Array
+            let blob;
+            if (data instanceof ArrayBuffer) {
+                blob = new Blob([data], { type: 'image/jpeg' });
+            } else if (data instanceof Uint8Array) {
+                blob = new Blob([data], { type: 'image/jpeg' });
+            } else if (typeof data === 'string') {
+                // If it's base64 string, convert it
+                const binaryString = atob(data);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                blob = new Blob([bytes], { type: 'image/jpeg' });
+            } else if (Array.isArray(data)) {
+                // If it's an array of numbers
+                blob = new Blob([new Uint8Array(data)], { type: 'image/jpeg' });
+            } else {
+                // Try to convert to Uint8Array
+                blob = new Blob([new Uint8Array(data)], { type: 'image/jpeg' });
+            }
+            
             const url = URL.createObjectURL(blob);
             const img = new Image();
             
