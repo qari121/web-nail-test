@@ -205,25 +205,35 @@
             console.log('Server connected:', data);
         });
 
+        let frameRequestTime = null;
+        
         socket.on('result', (data) => {
+            // Track when frame was requested for latency calculation
+            const requestTime = frameRequestTime || performance.now();
+            frameRequestTime = null;
+            
             // data is binary JPEG data (not base64)
             const blob = new Blob([data], { type: 'image/jpeg' });
             const url = URL.createObjectURL(blob);
             const img = new Image();
             
             img.onload = () => {
-                // Calculate latency
+                // Calculate latency (time from request to display)
                 const now = performance.now();
-                if (lastFrameTime) {
-                    const latency = now - lastFrameTime;
-                    latencyHistory.push(latency);
-                    if (latencyHistory.length > 30) {
-                        latencyHistory.shift();
-                    }
-                    const avgLatency = latencyHistory.reduce((a, b) => a + b, 0) / latencyHistory.length;
-                    latencyElement.textContent = Math.round(avgLatency) + 'ms';
+                const latency = now - requestTime;
+                latencyHistory.push(latency);
+                if (latencyHistory.length > 30) {
+                    latencyHistory.shift();
                 }
-                lastFrameTime = now;
+                const avgLatency = latencyHistory.reduce((a, b) => a + b, 0) / latencyHistory.length;
+                latencyElement.textContent = Math.round(avgLatency) + 'ms';
+                
+                if (lastFrameTime) {
+                    const frameDelta = now - lastFrameTime;
+                    lastFrameTime = now;
+                } else {
+                    lastFrameTime = now;
+                }
 
                 // Draw processed image - DON'T reset canvas dimensions (causes stutter)
                 // Only set dimensions if they changed (shouldn't happen often)
@@ -276,9 +286,13 @@
                 const captureCtx = captureCanvas.getContext('2d');
                 
                 let isProcessing = false;
+                let pendingFrames = 0;
+                
                 processingInterval = setInterval(() => {
-                    if (video.readyState === video.HAVE_ENOUGH_DATA && !isProcessing && socket.connected) {
+                    // Skip if already processing or too many pending frames (prevent queue buildup)
+                    if (video.readyState === video.HAVE_ENOUGH_DATA && !isProcessing && socket.connected && pendingFrames < 2) {
                         isProcessing = true;
+                        pendingFrames++;
                         
                         // Capture frame to hidden canvas
                         captureCtx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
@@ -288,17 +302,21 @@
                             if (blob && socket.connected) {
                                 // Send binary data directly (much faster than base64)
                                 blob.arrayBuffer().then(buffer => {
+                                    frameRequestTime = performance.now(); // Track when frame is sent
                                     socket.emit('frame', buffer);
+                                    pendingFrames = Math.max(0, pendingFrames - 1);
                                     isProcessing = false;
                                 }).catch(() => {
+                                    pendingFrames = Math.max(0, pendingFrames - 1);
                                     isProcessing = false;
                                 });
                             } else {
+                                pendingFrames = Math.max(0, pendingFrames - 1);
                                 isProcessing = false;
                             }
                         }, 'image/jpeg', 0.6); // Lower quality for speed
                     }
-                }, 50); // Process every 50ms (20 FPS max)
+                }, 100); // Process every 100ms (10 FPS max) - reduced to prevent queue buildup
 
             } catch (err) {
                 console.error('Error accessing camera:', err);
