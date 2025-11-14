@@ -46,9 +46,9 @@ det_idx = None
 proto_idx = None
 
 # Processing parameters (optimized for performance)
-MIN_CONTOUR = 40
+MIN_CONTOUR = 30  # Reduced for faster processing
 DILATION_PIXELS = 2
-MASK_DOWNSCALE = 0.25
+MASK_DOWNSCALE = 0.2  # Reduced from 0.25 for faster processing (small quality tradeoff)
 TFLITE_THREADS = max(1, multiprocessing.cpu_count() - 1)
 
 _SMALL_KERNEL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
