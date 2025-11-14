@@ -402,8 +402,8 @@ def _process_frame_worker():
                 encode_params = [cv2.IMWRITE_JPEG_QUALITY, 75]
                 _, buffer = cv2.imencode('.jpg', cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR), encode_params)
                 
-                # Send result back to all connected clients
-                socketio.emit('result', buffer.tobytes(), binary=True)
+                # Send result back to all connected clients (Flask-SocketIO handles binary automatically)
+                socketio.emit('result', buffer.tobytes())
                 
             except Exception as e:
                 traceback.print_exc()
