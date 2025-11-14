@@ -416,7 +416,8 @@
                 const ctx2 = canvas.getContext('2d');
                 ctx2.drawImage(webcamVideo, 0, 0);
                 
-                const imageData = canvas.toDataURL('image/jpeg', 0.8);
+                // Lower quality for faster transfer (0.6 instead of 0.8)
+                const imageData = canvas.toDataURL('image/jpeg', 0.6);
 
                 // Send to server for processing
                 const response = await fetch('/api/process_base64', {

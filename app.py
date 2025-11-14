@@ -29,10 +29,10 @@ output_details = None
 det_idx = None
 proto_idx = None
 
-# Processing parameters (optimized for performance)
-MIN_CONTOUR = 60
-DILATION_PIXELS = 3
-MASK_DOWNSCALE = 0.3  # Reduced from 0.4 for faster processing
+# Processing parameters (optimized for performance - aggressive settings)
+MIN_CONTOUR = 40  # Reduced for faster processing
+DILATION_PIXELS = 2  # Reduced for faster processing
+MASK_DOWNSCALE = 0.25  # Further reduced for maximum speed
 TFLITE_THREADS = max(1, multiprocessing.cpu_count() - 1)  # Use available CPUs
 
 _SMALL_KERNEL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
@@ -51,7 +51,35 @@ def load_model():
         raise FileNotFoundError(f"TFLite model not found at: {MODEL_PATH}")
     
     # Use more threads for better performance on multi-core systems
-    interpreter = tf.lite.Interpreter(model_path=MODEL_PATH, num_threads=TFLITE_THREADS)
+    # Try GPU delegate if available (for CUDA-enabled RunPod instances)
+    interpreter = None
+    try:
+        # Try GPU delegate first (if CUDA is available)
+        delegate_list = []
+        try:
+            gpu_delegate = tf.lite.experimental.load_delegate('libedgetpu.so.1')
+            delegate_list.append(gpu_delegate)
+            print("Using EdgeTPU delegate")
+        except:
+            try:
+                gpu_delegate = tf.lite.experimental.load_delegate('libgpu_delegate.so')
+                delegate_list.append(gpu_delegate)
+                print("Using GPU delegate")
+            except:
+                print("GPU delegate not available, using CPU")
+        
+        if delegate_list:
+            interpreter = tf.lite.Interpreter(
+                model_path=MODEL_PATH,
+                experimental_delegates=delegate_list,
+                num_threads=TFLITE_THREADS
+            )
+        else:
+            interpreter = tf.lite.Interpreter(model_path=MODEL_PATH, num_threads=TFLITE_THREADS)
+    except Exception as e:
+        print(f"GPU delegate failed ({e}), falling back to CPU")
+        interpreter = tf.lite.Interpreter(model_path=MODEL_PATH, num_threads=TFLITE_THREADS)
+    
     interpreter.allocate_tensors()
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
@@ -350,8 +378,8 @@ def process_base64():
         nparr = np.frombuffer(image_bytes, np.uint8)
         image_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
-        # Limit image size for performance (reduced for faster processing)
-        max_dimension = 640  # Reduced from 1280 for better performance
+        # Limit image size for performance (aggressive reduction for speed)
+        max_dimension = 480  # Further reduced for maximum performance
         if image_bgr is not None:
             h, w = image_bgr.shape[:2]
             if max(h, w) > max_dimension:
