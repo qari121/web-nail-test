@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Virtual Nail Polish Try-On (WebSocket)</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 10px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 320px;
+            width: 100%;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .header {
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            font-size: 1.5em;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 280px;
+            margin: 0 auto 20px;
+            aspect-ratio: 9 / 16;
+            background: #000;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .video-container video {
+            display: none !important;
+            visibility: hidden;
+        }
+
+        .video-container canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        .metrics {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 20px;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 10px;
+        }
+
+        .metric {
+            text-align: center;
+        }
+
+        .metric-label {
+            font-size: 0.75em;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .metric-value {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 0.85em;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .status {
+            margin-top: 10px;
+            padding: 8px;
+            border-radius: 8px;
+            font-size: 0.85em;
+        }
+
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Virtual Nail Polish</h1>
+            <p>Try-On Demo (WebSocket)</p>
+        </div>
+
+        <div class="video-container">
+            <video id="video" autoplay playsinline></video>
+            <canvas id="canvas"></canvas>
+        </div>
+
+        <div class="metrics" id="metrics" style="display: none;">
+            <div class="metric">
+                <div class="metric-label">FPS</div>
+                <div class="metric-value" id="fps">0</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Latency</div>
+                <div class="metric-value" id="latency">0ms</div>
+            </div>
+        </div>
+
+        <button id="startBtn">Start Camera</button>
+        <button id="stopBtn" disabled>Stop Camera</button>
+
+        <div class="status disconnected" id="status">Disconnected</div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const status = document.getElementById('status');
+        const metrics = document.getElementById('metrics');
+        const fpsElement = document.getElementById('fps');
+        const latencyElement = document.getElementById('latency');
+
+        let stream = null;
+        let socket = null;
+        let processingInterval = null;
+        let frameTimes = [];
+        let lastFrameTime = null;
+        let latencyHistory = [];
+
+        // Initialize Socket.IO connection
+        socket = io();
+
+        socket.on('connect', () => {
+            status.textContent = 'Connected';
+            status.className = 'status connected';
+        });
+
+        socket.on('disconnect', () => {
+            status.textContent = 'Disconnected';
+            status.className = 'status disconnected';
+        });
+
+        socket.on('connected', (data) => {
+            console.log('Server connected:', data);
+        });
+
+        socket.on('result', (data) => {
+            // data is binary JPEG data (not base64)
+            const blob = new Blob([data], { type: 'image/jpeg' });
+            const url = URL.createObjectURL(blob);
+            const img = new Image();
+            
+            img.onload = () => {
+                // Calculate latency
+                const now = performance.now();
+                if (lastFrameTime) {
+                    const latency = now - lastFrameTime;
+                    latencyHistory.push(latency);
+                    if (latencyHistory.length > 30) {
+                        latencyHistory.shift();
+                    }
+                    const avgLatency = latencyHistory.reduce((a, b) => a + b, 0) / latencyHistory.length;
+                    latencyElement.textContent = Math.round(avgLatency) + 'ms';
+                }
+                lastFrameTime = now;
+
+                // Draw processed image
+                canvas.width = img.width;
+                canvas.height = img.height;
+                ctx.drawImage(img, 0, 0);
+                URL.revokeObjectURL(url);
+
+                // Calculate FPS
+                const currentTime = performance.now();
+                frameTimes.push(currentTime);
+                frameTimes = frameTimes.filter(time => currentTime - time < 1000);
+                fpsElement.textContent = frameTimes.length;
+            };
+            
+            img.src = url;
+        });
+
+        socket.on('error', (data) => {
+            console.error('Error:', data.message);
+        });
+
+        startBtn.addEventListener('click', async () => {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: { ideal: 480 },
+                        height: { ideal: 640 },
+                        facingMode: 'user'
+                    } 
+                });
+                
+                video.srcObject = stream;
+                await video.play();
+
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                metrics.style.display = 'flex';
+
+                // Process frames via WebSocket (binary, not base64)
+                processingInterval = setInterval(() => {
+                    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                        // Draw current frame to canvas temporarily
+                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        
+                        // Get ImageData and convert to JPEG (binary)
+                        canvas.toBlob((blob) => {
+                            if (blob && socket.connected) {
+                                // Send binary data directly (much faster than base64)
+                                blob.arrayBuffer().then(buffer => {
+                                    socket.emit('frame', buffer);
+                                });
+                            }
+                        }, 'image/jpeg', 0.6); // Lower quality for speed
+                    }
+                }, 50); // Process every 50ms (20 FPS max)
+
+            } catch (err) {
+                console.error('Error accessing camera:', err);
+                alert('Error accessing camera: ' + err.message);
+            }
+        });
+
+        stopBtn.addEventListener('click', () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            
+            if (processingInterval) {
+                clearInterval(processingInterval);
+                processingInterval = null;
+            }
+
+            video.srcObject = null;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            metrics.style.display = 'none';
+            
+            frameTimes = [];
+            latencyHistory = [];
+            fpsElement.textContent = '0';
+            latencyElement.textContent = '0ms';
+        });
+    </script>
+</body>
+</html>
+
