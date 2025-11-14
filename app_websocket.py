@@ -8,7 +8,8 @@ import io
 import traceback
 import multiprocessing
 import threading
-from flask import Flask, render_template
+from queue import Queue, Empty
+from flask import Flask, render_template, request
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import cv2
@@ -21,6 +22,11 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # Thread lock for TensorFlow Lite interpreter (not thread-safe)
 _interpreter_lock = threading.Lock()
+
+# Frame queue - only keep latest frame (size=1) to prevent delay buildup
+_frame_queue = Queue(maxsize=1)
+_processing_thread = None
+_processing_active = threading.Event()
 
 # Configuration
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nails_seg_s_yolov8_v1_float16.tflite")
@@ -361,35 +367,76 @@ def handle_disconnect():
     print('Client disconnected')
 
 
+def _process_frame_worker():
+    """Worker thread that processes frames from queue"""
+    global _frame_queue, _processing_active
+    
+    while _processing_active.is_set():
+        try:
+            # Get frame from queue (with timeout to check if we should stop)
+            try:
+                frame_data, request_id = _frame_queue.get(timeout=0.1)
+            except Empty:
+                continue
+            
+            try:
+                # Decode binary JPEG data
+                nparr = np.frombuffer(frame_data, np.uint8)
+                image_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                
+                if image_bgr is None:
+                    continue
+                
+                # Limit image size for performance
+                max_dimension = 480
+                h, w = image_bgr.shape[:2]
+                if max(h, w) > max_dimension:
+                    scale = max_dimension / max(h, w)
+                    new_w, new_h = int(w * scale), int(h * scale)
+                    image_bgr = cv2.resize(image_bgr, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+                
+                # Process image
+                result_rgb = process_image(image_bgr)
+                
+                # Encode as JPEG (binary, not base64)
+                encode_params = [cv2.IMWRITE_JPEG_QUALITY, 75]
+                _, buffer = cv2.imencode('.jpg', cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR), encode_params)
+                
+                # Send result back to the client that requested it
+                socketio.emit('result', buffer.tobytes(), binary=True, room=request_id)
+                
+            except Exception as e:
+                traceback.print_exc()
+                socketio.emit('error', {'message': str(e)}, room=request_id)
+            
+            finally:
+                _frame_queue.task_done()
+                
+        except Exception as e:
+            traceback.print_exc()
+
+
 @socketio.on('frame')
 def handle_frame(data):
-    """Handle incoming frame (binary JPEG data)"""
+    """Handle incoming frame (binary JPEG data) - add to queue, drop old frames"""
     try:
-        # Decode binary JPEG data (much faster than base64)
-        nparr = np.frombuffer(data, np.uint8)
-        image_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        # Get the session ID for this client
+        request_id = request.sid
         
-        if image_bgr is None:
-            emit('error', {'message': 'Invalid image format'})
-            return
-        
-        # Limit image size for performance
-        max_dimension = 480
-        h, w = image_bgr.shape[:2]
-        if max(h, w) > max_dimension:
-            scale = max_dimension / max(h, w)
-            new_w, new_h = int(w * scale), int(h * scale)
-            image_bgr = cv2.resize(image_bgr, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-        
-        # Process image
-        result_rgb = process_image(image_bgr)
-        
-        # Encode as JPEG (binary, not base64)
-        encode_params = [cv2.IMWRITE_JPEG_QUALITY, 75]
-        _, buffer = cv2.imencode('.jpg', cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR), encode_params)
-        
-        # Send binary data back (much faster than base64)
-        emit('result', buffer.tobytes(), binary=True)
+        # Try to put frame in queue (non-blocking)
+        # If queue is full, remove old frame and add new one (only process latest)
+        try:
+            _frame_queue.put_nowait((data, request_id))
+        except:
+            # Queue is full - remove old frame and add new one
+            try:
+                _frame_queue.get_nowait()  # Remove old frame
+            except:
+                pass
+            try:
+                _frame_queue.put_nowait((data, request_id))  # Add new frame
+            except:
+                pass  # If still fails, skip this frame
     
     except Exception as e:
         traceback.print_exc()
@@ -401,6 +448,12 @@ if interpreter is None:
     print("Loading TFLite model...")
     load_model()
     print("Model loaded successfully!")
+
+# Start processing thread
+_processing_active.set()
+_processing_thread = threading.Thread(target=_process_frame_worker, daemon=True)
+_processing_thread.start()
+print("Frame processing thread started")
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
