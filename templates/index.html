@@ -145,6 +145,30 @@
             margin-top: 20px;
             font-size: 0.9em;
         }
+
+        .metrics {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+
+        .metric {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 8px 15px;
+            border-radius: 8px;
+            color: #4CAF50;
+            font-weight: 600;
+            font-size: 0.85em;
+            font-family: 'Courier New', monospace;
+        }
+
+        .metric-label {
+            color: #888;
+            font-size: 0.75em;
+            margin-right: 5px;
+        }
     </style>
 </head>
 <body>
@@ -170,6 +194,17 @@
         </div>
 
         <div class="status" id="status">Click "Start Camera" to begin</div>
+        
+        <div class="metrics" id="metrics" style="display: none;">
+            <div class="metric">
+                <span class="metric-label">FPS:</span>
+                <span id="fpsDisplay">0</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Latency:</span>
+                <span id="latencyDisplay">0ms</span>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -239,10 +274,18 @@
         const ctx = outputCanvas.getContext('2d');
         const status = document.getElementById('status');
         const loading = document.getElementById('loading');
+        const metrics = document.getElementById('metrics');
+        const fpsDisplay = document.getElementById('fpsDisplay');
+        const latencyDisplay = document.getElementById('latencyDisplay');
 
         let stream = null;
         let processingInterval = null;
         let isProcessing = false;
+        
+        // FPS and latency tracking
+        let frameTimes = [];
+        let lastFrameTime = 0;
+        let latencyHistory = [];
 
         startBtn.addEventListener('click', async () => {
             try {
@@ -312,6 +355,12 @@
                 startBtn.style.display = 'none';
                 stopBtn.style.display = 'inline-block';
                 status.textContent = 'Camera active - Processing frames...';
+                metrics.style.display = 'flex';
+                
+                // Reset metrics
+                frameTimes = [];
+                latencyHistory = [];
+                lastFrameTime = Date.now();
 
                 // Process frames
                 processingInterval = setInterval(() => {
@@ -348,12 +397,16 @@
             startBtn.style.display = 'inline-block';
             stopBtn.style.display = 'none';
             status.textContent = 'Camera stopped';
+            metrics.style.display = 'none';
+            fpsDisplay.textContent = '0';
+            latencyDisplay.textContent = '0ms';
         });
 
         async function processFrame() {
             if (isProcessing) return;
             
             isProcessing = true;
+            const requestStartTime = performance.now();
             
             try {
                 // Capture frame from video
@@ -376,7 +429,34 @@
                     })
                 });
 
+                const requestEndTime = performance.now();
+                const latency = Math.round(requestEndTime - requestStartTime);
+                
+                // Update latency
+                latencyHistory.push(latency);
+                if (latencyHistory.length > 10) {
+                    latencyHistory.shift();
+                }
+                const avgLatency = Math.round(
+                    latencyHistory.reduce((a, b) => a + b, 0) / latencyHistory.length
+                );
+                latencyDisplay.textContent = `${avgLatency}ms`;
+
                 const data = await response.json();
+                
+                // Calculate FPS
+                const now = Date.now();
+                if (lastFrameTime > 0) {
+                    const frameDelta = now - lastFrameTime;
+                    frameTimes.push(frameDelta);
+                    if (frameTimes.length > 30) {
+                        frameTimes.shift();
+                    }
+                    const avgFrameTime = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length;
+                    const fps = Math.round(1000 / avgFrameTime);
+                    fpsDisplay.textContent = fps;
+                }
+                lastFrameTime = now;
 
                 if (data.success) {
                     // Draw processed image on canvas (only show processed output)
