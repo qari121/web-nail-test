@@ -204,10 +204,16 @@ def process_image(image_bgr):
     interpreter.set_tensor(input_details[0]['index'], _input_tensor)
     interpreter.invoke()
     # Copy outputs immediately and ensure no references remain
-    outputs = []
+    # Get all outputs first, then copy them to break references
+    raw_outputs = []
     for od in output_details:
-        tensor_data = interpreter.get_tensor(od['index'])
-        outputs.append(np.array(tensor_data, copy=True))
+        raw_outputs.append(interpreter.get_tensor(od['index']))
+    
+    # Now create deep copies to break all references
+    outputs = []
+    for raw_output in raw_outputs:
+        outputs.append(np.array(raw_output, copy=True))
+    del raw_outputs  # Clear raw references immediately
     
     combined_mask = np.zeros((H, W), dtype=np.uint8)
     
@@ -283,11 +289,20 @@ def process_image(image_bgr):
                 if combined_mask_in.any():
                     mask_full = cv2.resize(combined_mask_in, (W, H), interpolation=cv2.INTER_LINEAR)
                     _, combined_mask = cv2.threshold(mask_full, 127, 255, cv2.THRESH_BINARY)
+                
+                # Clear references immediately after use (inside the if block)
+                del proto_reshaped, mask_logits, mask_stack, mask_coeffs, boxes, mask_coeffs, scores
         
         # Clear all references to outputs before function returns
-        del outputs, proto, det
-        if 'mask_coeffs' in locals():
-            del mask_coeffs, scores, boxes, proto_reshaped, mask_logits, mask_stack
+        # Only delete variables that exist
+        try:
+            del outputs
+        except:
+            pass
+        try:
+            del proto, det
+        except:
+            pass
 
     if combined_mask.any():
         small_w = max(8, int(W * MASK_DOWNSCALE))
