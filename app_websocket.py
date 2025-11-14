@@ -9,7 +9,7 @@ import traceback
 import multiprocessing
 import threading
 from queue import Queue, Empty
-from flask import Flask, render_template, request
+from flask import Flask, render_template
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import cv2
@@ -403,11 +403,11 @@ def _process_frame_worker():
                 _, buffer = cv2.imencode('.jpg', cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR), encode_params)
                 
                 # Send result back to the client that requested it
-                socketio.emit('result', buffer.tobytes(), binary=True, room=request_id)
+                socketio.emit('result', buffer.tobytes(), binary=True, to=request_id)
                 
             except Exception as e:
                 traceback.print_exc()
-                socketio.emit('error', {'message': str(e)}, room=request_id)
+                socketio.emit('error', {'message': str(e)}, to=request_id)
             
             finally:
                 _frame_queue.task_done()
@@ -421,7 +421,8 @@ def handle_frame(data):
     """Handle incoming frame (binary JPEG data) - add to queue, drop old frames"""
     try:
         # Get the session ID for this client
-        request_id = request.sid
+        from flask import request as flask_request
+        request_id = flask_request.sid
         
         # Try to put frame in queue (non-blocking)
         # If queue is full, remove old frame and add new one (only process latest)
