@@ -237,64 +237,64 @@ def process_image(image_bgr):
     combined_mask = np.zeros((H, W), dtype=np.uint8)
     
     if proto_idx is not None and det_idx is not None and proto is not None and det.ndim == 2:
-            P = proto.shape[-1]
-            cols = det.shape[1]
-            if cols >= 5 + P:
-                mask_coeffs = np.array(det[:, -P:], copy=True)
-                scores = np.array(det[:, 4], copy=True)
-                boxes = np.array(det[:, :4], copy=True)
-            else:
-                mask_coeffs = np.array(det[:, -P:], copy=True)
-                scores = np.array(det[:, 4], copy=True) if det.shape[1] > 4 else np.zeros(det.shape[0])
-                boxes = np.array(det[:, :4], copy=True) if det.shape[1] >= 4 else np.zeros((det.shape[0], 4))
+        P = proto.shape[-1]
+        cols = det.shape[1]
+        if cols >= 5 + P:
+            mask_coeffs = np.array(det[:, -P:], copy=True)
+            scores = np.array(det[:, 4], copy=True)
+            boxes = np.array(det[:, :4], copy=True)
+        else:
+            mask_coeffs = np.array(det[:, -P:], copy=True)
+            scores = np.array(det[:, 4], copy=True) if det.shape[1] > 4 else np.zeros(det.shape[0])
+            boxes = np.array(det[:, :4], copy=True) if det.shape[1] >= 4 else np.zeros((det.shape[0], 4))
 
-            valid_idx = np.where(scores > 0.25)[0]
-            if valid_idx.size > 0:
-                mask_coeffs = np.array(mask_coeffs[valid_idx], copy=True)
-                boxes = np.array(boxes[valid_idx], copy=True)
+        valid_idx = np.where(scores > 0.25)[0]
+        if valid_idx.size > 0:
+            mask_coeffs = np.array(mask_coeffs[valid_idx], copy=True)
+            boxes = np.array(boxes[valid_idx], copy=True)
 
-                ph, pw, _ = proto.shape
-                # Ensure reshape creates a copy, not a view
-                proto_reshaped = np.array(proto.reshape(-1, P), copy=True)
-                mask_logits = proto_reshaped @ mask_coeffs.T
-                mask_stack = 1.0 / (1.0 + np.exp(-mask_logits))
-                mask_stack = np.array(mask_stack.reshape(ph, pw, -1), copy=True)
+            ph, pw, _ = proto.shape
+            # Ensure reshape creates a copy, not a view
+            proto_reshaped = np.array(proto.reshape(-1, P), copy=True)
+            mask_logits = proto_reshaped @ mask_coeffs.T
+            mask_stack = 1.0 / (1.0 + np.exp(-mask_logits))
+            mask_stack = np.array(mask_stack.reshape(ph, pw, -1), copy=True)
 
-                combined_mask_in = np.zeros((in_h, in_w), dtype=np.uint8)
-                for idx in range(mask_stack.shape[-1]):
-                    mask = np.array(mask_stack[:, :, idx], copy=True)
-                    mask_in = cv2.resize((mask * 255.0).astype(np.uint8),
-                                         (in_w, in_h),
-                                         interpolation=cv2.INTER_LINEAR)
+            combined_mask_in = np.zeros((in_h, in_w), dtype=np.uint8)
+            for idx in range(mask_stack.shape[-1]):
+                mask = np.array(mask_stack[:, :, idx], copy=True)
+                mask_in = cv2.resize((mask * 255.0).astype(np.uint8),
+                                     (in_w, in_h),
+                                     interpolation=cv2.INTER_LINEAR)
 
-                    cx, cy, bw, bh = boxes[idx]
-                    if cx > 1.5 or cy > 1.5 or bw > 1.5 or bh > 1.5:
-                        x1, y1 = int(cx - bw / 2), int(cy - bh / 2)
-                        x2, y2 = int(cx + bw / 2), int(cy + bh / 2)
-                    else:
-                        x1 = int((cx - bw / 2) * in_w)
-                        y1 = int((cy - bh / 2) * in_h)
-                        x2 = int((cx + bw / 2) * in_w)
-                        y2 = int((cy + bh / 2) * in_h)
+                cx, cy, bw, bh = boxes[idx]
+                if cx > 1.5 or cy > 1.5 or bw > 1.5 or bh > 1.5:
+                    x1, y1 = int(cx - bw / 2), int(cy - bh / 2)
+                    x2, y2 = int(cx + bw / 2), int(cy + bh / 2)
+                else:
+                    x1 = int((cx - bw / 2) * in_w)
+                    y1 = int((cy - bh / 2) * in_h)
+                    x2 = int((cx + bw / 2) * in_w)
+                    y2 = int((cy + bh / 2) * in_h)
 
-                    x1, y1 = max(0, x1), max(0, y1)
-                    x2, y2 = min(in_w, x2), min(in_h, y2)
+                x1, y1 = max(0, x1), max(0, y1)
+                x2, y2 = min(in_w, x2), min(in_h, y2)
 
-                    if x2 > x1 and y2 > y1:
-                        roi = mask_in[y1:y2, x1:x2]
-                        if roi.size:
-                            combined_mask_in[y1:y2, x1:x2] = np.maximum(
-                                combined_mask_in[y1:y2, x1:x2], roi
-                            )
-                    else:
-                        combined_mask_in = np.maximum(combined_mask_in, mask_in)
+                if x2 > x1 and y2 > y1:
+                    roi = mask_in[y1:y2, x1:x2]
+                    if roi.size:
+                        combined_mask_in[y1:y2, x1:x2] = np.maximum(
+                            combined_mask_in[y1:y2, x1:x2], roi
+                        )
+                else:
+                    combined_mask_in = np.maximum(combined_mask_in, mask_in)
 
-                if combined_mask_in.any():
-                    mask_full = cv2.resize(combined_mask_in, (W, H), interpolation=cv2.INTER_LINEAR)
-                    _, combined_mask = cv2.threshold(mask_full, 127, 255, cv2.THRESH_BINARY)
-                
-                # Clear references immediately after use (inside the if block)
-                del proto_reshaped, mask_logits, mask_stack, mask_coeffs, boxes, scores
+            if combined_mask_in.any():
+                mask_full = cv2.resize(combined_mask_in, (W, H), interpolation=cv2.INTER_LINEAR)
+                _, combined_mask = cv2.threshold(mask_full, 127, 255, cv2.THRESH_BINARY)
+            
+            # Clear references immediately after use (inside the if block)
+            del proto_reshaped, mask_logits, mask_stack, mask_coeffs, boxes, scores
         
         # Clear proto and det references before function returns
         # This is critical to prevent TensorFlow Lite interpreter errors
