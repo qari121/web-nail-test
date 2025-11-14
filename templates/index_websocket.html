@@ -225,9 +225,12 @@
                 }
                 lastFrameTime = now;
 
-                // Draw processed image
-                canvas.width = img.width;
-                canvas.height = img.height;
+                // Draw processed image - DON'T reset canvas dimensions (causes stutter)
+                // Only set dimensions if they changed (shouldn't happen often)
+                if (canvas.width !== img.width || canvas.height !== img.height) {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                }
                 ctx.drawImage(img, 0, 0);
                 URL.revokeObjectURL(url);
 
@@ -266,18 +269,32 @@
                 metrics.style.display = 'flex';
 
                 // Process frames via WebSocket (binary, not base64)
+                // Use a hidden canvas for capturing frames to avoid flicker
+                const captureCanvas = document.createElement('canvas');
+                captureCanvas.width = video.videoWidth;
+                captureCanvas.height = video.videoHeight;
+                const captureCtx = captureCanvas.getContext('2d');
+                
+                let isProcessing = false;
                 processingInterval = setInterval(() => {
-                    if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                        // Draw current frame to canvas temporarily
-                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    if (video.readyState === video.HAVE_ENOUGH_DATA && !isProcessing && socket.connected) {
+                        isProcessing = true;
+                        
+                        // Capture frame to hidden canvas
+                        captureCtx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
                         
                         // Get ImageData and convert to JPEG (binary)
-                        canvas.toBlob((blob) => {
+                        captureCanvas.toBlob((blob) => {
                             if (blob && socket.connected) {
                                 // Send binary data directly (much faster than base64)
                                 blob.arrayBuffer().then(buffer => {
                                     socket.emit('frame', buffer);
+                                    isProcessing = false;
+                                }).catch(() => {
+                                    isProcessing = false;
                                 });
+                            } else {
+                                isProcessing = false;
                             }
                         }, 'image/jpeg', 0.6); // Lower quality for speed
                     }
