@@ -227,15 +227,16 @@ def process_image(image_bgr):
             del raw_proto, raw_det
     
     # Process outputs outside the lock to minimize lock time
-        
+    if proto is not None:
         # Process proto
         if proto.ndim == 4 and proto.shape[0] == 1:
             proto = np.array(proto[0], copy=True)
         elif proto.ndim == 3 and proto.shape[0] == 1:
             proto = np.array(proto[0], copy=True)
-        if proto is not None and proto.ndim != 3:
+        if proto.ndim != 3:
             proto = None
 
+    if det is not None:
         # Process det
         if det.ndim == 3 and det.shape[0] == 1:
             det = np.array(det[0], copy=True)
