@@ -417,12 +417,11 @@ def _process_frame_worker():
 
 
 @socketio.on('frame')
-def handle_frame(data):
+def handle_frame(data, request):
     """Handle incoming frame (binary JPEG data) - add to queue, drop old frames"""
     try:
         # Get the session ID for this client
-        from flask import request as flask_request
-        request_id = flask_request.sid
+        request_id = request.sid
         
         # Try to put frame in queue (non-blocking)
         # If queue is full, remove old frame and add new one (only process latest)
